@@ -82,10 +82,9 @@ WSGI_APPLICATION = 'myproject.wsgi.application'
 # Uses Postgres URL if available in .env, otherwise falls back to SQLite
 DATABASES = {
     'default': dj_database_url.config(
-        default='sqlite:///db.sqlite3',
+        default=os.getenv('DATABASE_URL'),
         conn_max_age=600,
         conn_health_checks=True,
-        ssl_require='ssl' in os.getenv('DATABASE_URL', '') # Enable SSL only if using Postgres URL
     )
 }
 

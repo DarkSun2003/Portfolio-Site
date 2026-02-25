@@ -13,17 +13,17 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 # SECURITY WARNING: keep the secret key used in production secret!
 # Reads from .env, defaults to a local dev key if missing
-SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-dev-key-for-local-use-only')
+SECRET_KEY = os.getenv('SECRET_KEY')
 
 # SECURITY WARNING: don't run with debug turned on in production!
 # Reads from .env, defaults to True for local safety
 DEBUG = os.getenv('DEBUG', 'True') == 'True'
 
 # Reads allowed hosts from .env, defaults to localhost if missing
-ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
+ALLOWED_HOSTS = ['portfolio-site-production-e161.up.railway.app','http://portfolio-site-production-e161.up.railway.app']
 
 # CSRF Settings (Important for Production APIs)
-CSRF_TRUSTED_ORIGINS = os.getenv('CSRF_TRUSTED_ORIGINS', 'http://localhost,http://127.0.0.1').split(',')
+CSRF_TRUSTED_ORIGINS = ['https://portfolio-site-production-e161.up.railway.app']
 
 # --- APPLICATIONS ---
 

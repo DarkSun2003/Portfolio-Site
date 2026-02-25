@@ -91,7 +91,12 @@ class ProjectViewSet(viewsets.ModelViewSet):
             count_new = 0
             count_updated = 0
             
+            # Keep track of valid URLs to clean up deleted ones later
+            valid_github_urls = []
+            
             for repo in repos:
+                valid_github_urls.append(repo['html_url'])
+                
                 # 1. Create or Update Project
                 project, created = Project.objects.get_or_create(
                     github_url=repo['html_url'],
@@ -135,9 +140,15 @@ class ProjectViewSet(viewsets.ModelViewSet):
                     except Exception as e:
                         print(f"Error fetching detailed languages for {repo['name']}: {e}")
             
-            return Response({
-                "message": f"Sync Complete. Added {count_new} new projects. Updated {count_updated} existing. Skills updated with all languages found."
-            }, status=status.HTTP_200_OK)
+            # --- NEW CLEANUP LOGIC ---
+            # Delete projects from DB that are no longer on GitHub
+            deleted_count = Project.objects.exclude(github_url__in=valid_github_urls).delete()[0]
+            
+            message = f"Sync Complete. Added {count_new} new. Updated {count_updated} existing."
+            if deleted_count > 0:
+                message += f" Removed {deleted_count} deleted repositories."
+                
+            return Response({"message": message}, status=status.HTTP_200_OK)
             
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
@@ -161,58 +172,72 @@ def github_webhook(request):
     if request.method == 'GET':
         return HttpResponse('OK', status=200)
 
-    # 2. Handle GitHub "Push" (POST request) - Updates your portfolio
+    # 2. Handle Events (POST request)
     if request.method == 'POST':
         try:
+            # Check what type of event this is
+            event_type = request.META.get('HTTP_X_GITHUB_EVENT')
             payload = json.loads(request.body)
-            
-            if 'repository' in payload and 'pusher' in payload:
-                repo_data = payload['repository']
-                repo_name = repo_data['name']
-                repo_url = repo_data['html_url']
-                repo_description = repo_data.get('description', "No description provided.")
-                
-                # 1. Sync Project Info
-                project, created = Project.objects.get_or_create(
-                    github_url=repo_url,
-                    defaults={
-                        'title': repo_name,
-                        'description': repo_description,
-                        'stars': 0, 
-                        'tags': 'GitHub, Auto-Synced',
-                        'is_synced': True
-                    }
-                )
-                
-                if created:
-                    print(f"Webhook: New project added - {repo_name}")
-                else:
-                    if project.description != repo_description:
-                        project.description = repo_description
-                        project.save()
-                    print(f"Webhook: Project updated - {repo_name}")
 
-                # 2. SYNC SKILLS AUTOMATICALLY (Deep Sync Logic)
-                languages_url = repo_data.get('languages_url')
-                
-                if languages_url:
-                    try:
-                        # Fetch the specific languages for THIS repo
-                        lang_res = requests.get(languages_url)
-                        
-                        if lang_res.status_code == 200:
-                            lang_data = lang_res.json()
+            # --- EVENT: REPOSITORY DELETED ---
+            if event_type == 'delete':
+                repo_data = payload.get('repository', {})
+                repo_url = repo_data.get('html_url')
+                if repo_url:
+                    deleted_count = Project.objects.filter(github_url=repo_url).delete()[0]
+                    if deleted_count > 0:
+                        print(f"Webhook: Deleted repository {repo_data.get('name')} from portfolio.")
+                    return JsonResponse({'status': 'success', 'message': 'Repository removed from portfolio'})
+
+            # --- EVENT: PUSH (Code updated) ---
+            if event_type == 'push':
+                if 'repository' in payload and 'pusher' in payload:
+                    repo_data = payload['repository']
+                    repo_name = repo_data['name']
+                    repo_url = repo_data['html_url']
+                    repo_description = repo_data.get('description', "No description provided.")
+                    
+                    # 1. Sync Project Info
+                    project, created = Project.objects.get_or_create(
+                        github_url=repo_url,
+                        defaults={
+                            'title': repo_name,
+                            'description': repo_description,
+                            'stars': 0, 
+                            'tags': 'GitHub, Auto-Synced',
+                            'is_synced': True
+                        }
+                    )
+                    
+                    if created:
+                        print(f"Webhook: New project added - {repo_name}")
+                    else:
+                        if project.description != repo_description:
+                            project.description = repo_description
+                            project.save()
+                        print(f"Webhook: Project updated - {repo_name}")
+
+                    # 2. SYNC SKILLS AUTOMATICALLY (Deep Sync Logic)
+                    languages_url = repo_data.get('languages_url')
+                    
+                    if languages_url:
+                        try:
+                            # Fetch the specific languages for THIS repo
+                            lang_res = requests.get(languages_url)
                             
-                            for lang_name in lang_data.keys():
-                                category = get_skill_category(lang_name)
-                                Skill.objects.get_or_create(
-                                    name=lang_name,
-                                    defaults={'category': category}
-                                )
-                    except Exception as e:
-                        print(f"Webhook Skill Sync Error: {e}")
+                            if lang_res.status_code == 200:
+                                lang_data = lang_res.json()
+                                
+                                for lang_name in lang_data.keys():
+                                    category = get_skill_category(lang_name)
+                                    Skill.objects.get_or_create(
+                                        name=lang_name,
+                                        defaults={'category': category}
+                                    )
+                        except Exception as e:
+                            print(f"Webhook Skill Sync Error: {e}")
 
-                return JsonResponse({'status': 'success', 'message': 'Project synced via Webhook'})
+                    return JsonResponse({'status': 'success', 'message': 'Project synced via Webhook'})
 
         except Exception as e:
             print(f"Webhook Error: {e}")
